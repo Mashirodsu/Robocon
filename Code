@@ -1,0 +1,1167 @@
+#include "sys.h"
+#include "delay.h"
+#include "usart.h"
+#include "led.h"
+#include "GYRO_Lib.h"
+#include "beep.h"
+#include "key.h"
+#include "My_BSP.h"
+#include "Basal_Move.h"
+#include "GYRO_Lib.h"
+#include "My_Flag.h"
+#include "PID_Control.h"
+#include "Robot.h"
+#include "ANO_DT.h"
+#include "Time.h"
+#include "PID_Control.h"
+#include "PID_forward.h"
+#include "PID_Parameter.h"
+#include "Route_Control.h"
+#include <stdio.h>
+#include "Robot.h"
+#include "can.h"
+#include "uart4.h"
+#include "Run_task.h"
+#include "uart4.h"
+#include "communication.h"
+#include "Global.h"
+#include "GYRO_Lib.h"
+#include "uart5.h"
+// 锁定点任务
+extern int32_t lock_type, Fuck_Go_flag;
+extern forward_ctl_t RouteToSet;
+u8 Control_Index = Forward_Control;/*调节方式*/
+int32_t RouteIndex= 0;
+extern int32_t start_pos_X, start_pos_Y;
+u8 can_buf[8];
+int32_t Drop_MachineDelayFlag = 0, Car_StableFlag=0, Key_StableFlag = 0;/*车调节稳定的标志位*/
+int32_t GetBallPoint_DT35AdjustXFlag = 1;
+int32_t GetBallPoint_DT35AdjustYFlag = 0;
+int32_t GetGoldenBallPoint_DT35AdjustYFlag = 1;
+
+
+void Run_Task(void)
+{
+	switch (RouteIndex)
+	{
+	case GetColorBallPoint1_ROUTE1://出启动区
+
+		USART_SendData(UART4, 'Y');
+		G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Max = 1000;
+		G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Min = -1000;
+		G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 1000;
+		G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -1000;
+		G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.P = 350;
+		G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.D = 30;
+		G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 350;
+		G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 20;
+
+		G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.P = 300;
+		G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.D = 20;
+		G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Max = 500;
+		G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Min = -500;	//2018-4-17
+
+																		//PID_Set_LineY_Value(Target_Y, ROUTE_TRACE_Y);
+																		//PID_Set_LineY_Value(Target_Y, ROUTE_LINE);
+		PID_Lock_LineYPoint();
+		//if ((my_abs(nloc.Coords.y - 10) < 1))
+		//if (Target_Y == 1)
+		//{
+		USART_SendData(UART4, 'Y');
+		RouteIndex = GetColorBallPoint1_ROUTE2;
+		Get_Cycle_T(0);
+		CameraData_UseFlag = CameraData_NotUse;
+		//USART_SendData(UART5, '1');
+		Control_Index = Forward_Control;
+
+		setup_Yline(4266);
+		PID_Set_LineX_Value(-550, ROUTE_LINE);
+
+		//setup_Xline(6500);
+		/*
+		}*/
+		if (Back_Flag == 1)//返回
+		{
+			RouteIndex = BackTo_StartPoint;
+		}
+		break;
+	case GetColorBallPoint1_ROUTE2://到第一个彩球的取球点
+		if ((4266 - nloc.Coords.y  > 1000) && (Control_Index == Forward_Control))//这里要留这么点距离用pid来调，这个线路过渡这里，不能实现0秒切换，车有可能飘着走
+		{
+			if (4266 - nloc.Coords.y < 300) //  5-29晚上
+			{
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Max = 1000;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Min = -1000;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 1000;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -1000;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.P = 450;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.D = 30;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 450;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 20;
+			}
+
+			PID_Angle_Loop_Test();    //PID角度调节
+			control_Yline();           //前馈式X直线控制
+			PID_DT35CameraLineXControl();
+		}
+		else
+		{
+			Control_Index = PID_Control;
+	/*		GetBallPoint_DT35AdjustYFlag = 1;*/
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.P = 250;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.D = 20;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 250;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 20;
+
+			PID_Set_LineY_Value(4266, ROUTE_TRACE_X);
+			PID_Set_LineY_Value(4266, ROUTE_LINE);//这里的X坐标用dt35确定
+			PID_Set_LineX_Value(-750, ROUTE_LINE);
+			PID_Set_LineX_Value(-750, ROUTE_TRACE_X);
+			X_Offset_CameraTarget = 0;
+			PID_DT35CameraLock_LineXPoint();
+			if ((my_abs(nloc.Coords.y - 4266) < 950))
+			{
+				Car_StableFlag++;
+				if (Car_StableFlag == 3)
+				{
+					USART_SendData(UART5, 0xB1);
+					BUZZER_OFF;
+					Car_StableFlag = 0;
+					USART_SendData(UART4, 'Y');
+					RouteIndex = GetColorBallPoint1_ROUTE3;
+				
+					Y_Offset_CameraTarget = 4266;
+					GetBallPoint_DT35AdjustXFlag = 1;
+
+					PID_Set_LineY_Value(4266, ROUTE_LINE);//这里的X坐标用dt35确定
+					PID_Set_LineX_Value(Drop_FirstColorBallPointX, ROUTE_LINE);
+	
+					CameraData_UseFlag = CameraData_Use;
+
+				}
+			}
+		}
+		if (Back_Flag == 1)//返回
+		{
+			RouteIndex = BackTo_StartPoint;
+		}
+		break;
+	case GetColorBallPoint1_ROUTE3://去(4500,Get_FirstColorBallPointY)
+	
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.P = 250;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.D = 30;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 250;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 20;
+		
+	
+		Control_Index = PID_Control;
+		PID_Lock_LineXPoint();
+		if ((my_abs(nloc.Coords.y - 4266) < 100) && (my_abs(nloc.Coords.x - Drop_FirstColorBallPointX) < 100))
+		{
+			if ((DT35_DataY< 1500) && (my_abs(nloc.Angle) < 1.f) && (DT35_DataX> 1500))
+			{
+				GetBallPoint_DT35AdjustXFlag = 1;
+				GetBallPoint_DT35AdjustYFlag = 2;
+			}
+			Car_StableFlag++;
+			if (Car_StableFlag == 5)
+			{
+				USART_SendData(UART5, 0xB1);
+				BUZZER_OFF;
+				Car_StableFlag = 0;
+				USART_SendData(UART4, 'Y');
+				RouteIndex = GetColorBallPoint1_ROUTE4;
+	
+				Y_Offset_CameraTarget = 4266;
+				GetBallPoint_DT35AdjustXFlag = 0;
+				GetBallPoint_DT35AdjustYFlag = 0;
+	
+				PID_Set_LineY_Value(4266, ROUTE_LINE);//这里的X坐标用dt35确定
+				PID_Set_LineX_Value(Drop_FirstColorBallPointX, ROUTE_LINE);
+
+			}
+		}
+
+
+		if (Back_Flag == 1)//返回
+		{
+			RouteIndex = BackTo_StartPoint;
+		}
+		break;
+
+	case GetColorBallPoint1_ROUTE4://
+		if ((DT35_DataY< 1500) && (my_abs(nloc.Angle) < 1.f) && (DT35_DataX> 1500))
+		{
+			GetBallPoint_DT35AdjustXFlag = 1;
+			GetBallPoint_DT35AdjustYFlag = 2;
+		}
+		G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Max = 500;
+		G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Min = -500;
+		G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 500;
+		G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -500;
+		G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.P = 150;
+		G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.D = 30;
+		G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 150;
+		G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 20;
+
+		PID_Set_LineY_Value(4266, ROUTE_LINE);//这里的X坐标用dt35确定
+		PID_Set_LineX_Value(Drop_FirstColorBallPointX, ROUTE_LINE);
+		PID_DT35CameraLock_LineXPoint();
+		if ((my_abs(nloc.Coords.y - 4266) < 10) && (my_abs(nloc.Coords.x - Drop_FirstColorBallPointX) < 10))
+		{
+			Car_StableFlag++;
+			if (Car_StableFlag == 5)
+			{
+				Car_StableFlag = 0;
+				RouteIndex = DropColorBallPoint1_ROUTE1;
+				X_Offset = -((int)GYRO_Location.x - nloc.Coords.x);
+				Y_Offset = -((int)GYRO_Location.y - nloc.Coords.y);
+				USART_printf("GYRO_Set_Position x%d  y%d  %d  %d ", (int)GYRO_Location.x,
+					(int)GYRO_Location.y, X_Offset, Y_Offset);
+				Y_Offset_CameraTarget = 4266;
+				GetBallPoint_DT35AdjustXFlag = 0;
+				GetBallPoint_DT35AdjustYFlag = 0;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Max = 1000;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Min = -1000;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 1000;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -1000;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.P = 250;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.D = 30;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 250;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 20;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 1500;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -1500;
+				G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.P = 8000;
+				G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.I = 0;
+				G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.D = 200;
+				PID_Set_Angle_Value(-13, ROUTE_LINE);
+				PID_Set_LineY_Value(4266, ROUTE_LINE);//这里的X坐标用dt35确定
+				PID_Set_LineX_Value(Drop_FirstColorBallPointX, ROUTE_LINE);
+
+			}
+		}
+	
+		if (Back_Flag == 1)//返回
+		{
+			RouteIndex = BackTo_StartPoint;
+		}
+
+		break;
+
+	case DropColorBallPoint1_ROUTE1://去扔第一个球
+
+		PID_Set_LineX_Value(Drop_FirstColorBallPointX, ROUTE_LINE);
+		PID_Set_Angle_Value(-13, ROUTE_LINE);
+		Y_Offset_CameraTarget = 4266;
+		PID_Lock_LineXPoint();
+	
+		if ((my_abs(Drop_FirstColorBallPointX - nloc.Coords.x)< 5) &&(nloc.Angle<-12))////这里要留这么点距离用pid来调，这个线路过渡这里，不能实现0秒切换，车有可能飘着走
+		{
+			Drop_MachineDelayFlag++;
+			if (Drop_MachineDelayFlag == 5)
+			{
+				USART_SendData(UART5, 0);
+				//can_buf[0] = 0; //达到第一个发射位置，让发射机构发射
+				//CAN1_SendMsg(can_buf, 0xCC);
+			}
+		}
+		//if (Drop_Machine_Flag == 4)
+		if (Drop_Machine_Flag == 1)
+		{
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.P = 12000;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.I = 0;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.D = 400;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Max = 2000;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Min = -2000;
+			PID_Set_Angle_Value(0, ROUTE_LINE);
+			Drop_MachineDelayFlag = 0;
+			CameraData_UseFlag = CameraData_NotUse;
+			USART_SendData(UART4, 'Y');
+			RouteIndex = GetColorBallPoint2_ROUTE1;
+			PID_Set_LineX_Value(Get_SecondColorBallPointX, ROUTE_TRACE_X);
+			PID_Set_LineX_Value(Get_SecondColorBallPointX, ROUTE_LINE);
+			PID_Set_LineY_Value(4700, ROUTE_LINE);
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.P = 550;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.D = 20;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Max = 850;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Min = -850;	//2018-4-17
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.P = 350;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.D = 20;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 350;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 20;
+			GetBallPoint_DT35AdjustYFlag = 0;
+			GetBallPoint_DT35AdjustXFlag = 0;
+			Drop_Machine_Flag = 0;
+			Key_StableFlag = 0;
+			Drop_MachineDelayFlag = 0;
+		}
+		if (Back_Flag == 1)//返回
+		{
+			RouteIndex = BackTo_StartPoint;
+		}
+		break;
+	case GetColorBallPoint2_ROUTE1:/*第13条路径：从抛射点去取第二个彩球*/
+
+			if ((my_abs(nloc.Coords.x - Get_SecondColorBallPointX) < 100))
+			{
+
+				GetBallPoint_DT35AdjustYFlag = 0;
+				GetBallPoint_DT35AdjustXFlag = 0;
+				CameraData_UseFlag = CameraData_NotUse;
+				PID_Set_LineX_Value(Get_SecondColorBallPointX, ROUTE_LINE);
+				PID_Set_LineY_Value(6266, ROUTE_LINE);
+				RouteIndex = DropColorBallPoint2_ROUTE1;
+
+			}
+			PID_DT35CamraLock_LineXPoint();
+
+
+		if (Back_Flag == 1)//返回
+		{
+			RouteIndex = BackTo_StartPoint;
+		}
+		break;
+	case DropColorBallPoint2_ROUTE1:
+		if ((5600 - nloc.Coords.y  > 100) )//这里要留这么点距离用pid来调，这个线路过渡这里，不能实现0秒切换，车有可能飘着走
+		{
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.P = 550;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.D = 20;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Max = 1550;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Min = -1550;	//2018-4-17
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.P = 250;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.D = 20;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 250;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 20;
+			PID_DT35CameraLock_LineXPoint();
+			//PID_Angle_Loop_Test();    //PID角度调节
+			//control_Xline();           //前馈式X直线控制
+			//PID_DT35CameraLineYControl();
+		}
+		else
+		{
+			GetBallPoint_DT35AdjustYFlag = 0;
+			GetBallPoint_DT35AdjustXFlag = 0;
+			Control_Index = PID_Control;
+			CameraData_UseFlag = CameraData_NotUse;
+			USART_SendData(UART4, 'Y');
+			RouteIndex = DropColorBallPoint2_ROUTE2;
+			Y_Offset_CameraTarget = 6300;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 300;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 20;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Max = 2000;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Min = -2000;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.P = 300;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.D = 100;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Max = 2000;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Min = -2000;
+			PID_Set_LineX_Value(Drop_SecondColorBallPointX, ROUTE_TRACE_X);
+			PID_Set_LineX_Value(Drop_SecondColorBallPointX, ROUTE_LINE);
+			Drop_MachineDelayFlag = 0;
+			PID_Set_LineY_Value(6300, ROUTE_LINE);
+			PID_DT35CameraLock_LineXPoint();
+		}
+		if (Back_Flag == 1)//返回
+		{
+			RouteIndex = BackTo_StartPoint;
+		}
+		break;
+	case DropColorBallPoint2_ROUTE2:
+		Y_Offset_CameraTarget = 6300;
+		PID_Lock_LineXPoint();
+		if (my_abs(nloc.Coords.x - Drop_SecondColorBallPointX) < 100&& (my_abs(nloc.Coords.y - 6300) < 100))
+		{
+			GetBallPoint_DT35AdjustYFlag = 1;
+			GetBallPoint_DT35AdjustXFlag = 1;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.P = 8000;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.I = 0;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.D = 200;
+		}
+		/*delay_ms(5);*/
+		if ((my_abs(nloc.Coords.x - Drop_SecondColorBallPointX) < 10) && (my_abs(nloc.Coords.y - 6300) < 10))
+		{
+			Drop_MachineDelayFlag++;
+			if (Drop_MachineDelayFlag == 5)
+			{
+				X_Offset = -((int)GYRO_Location.x - nloc.Coords.x);
+				Y_Offset = -((int)GYRO_Location.y - nloc.Coords.y);
+				USART_printf("GYRO_Set_Position x%d  y%d  %d  %d ", (int)GYRO_Location.x,
+					(int)GYRO_Location.y, X_Offset, Y_Offset);
+				GetBallPoint_DT35AdjustYFlag = 0;
+				GetBallPoint_DT35AdjustXFlag = 0;
+				Drop_MachineDelayFlag = 0;
+				PID_Set_Angle_Value(-10, ROUTE_LINE);
+				RouteIndex = DropColorBallPoint2_ROUTE3;
+				
+			}
+			
+		}
+
+		//if (Drop_Machine_Flag == 2)//抓好了之后走这是由摄像头决定
+
+		if (Back_Flag == 1)//返回
+		{
+			RouteIndex = BackTo_StartPoint;
+		}
+		break;
+	case DropColorBallPoint2_ROUTE3:
+		Y_Offset_CameraTarget = 6300;
+		PID_Lock_LineXPoint();
+		if(my_abs(nloc.Coords.x - Drop_SecondColorBallPointX) < 10 && (my_abs(nloc.Coords.y - 6300) < 10) && (my_abs(nloc.Angle)>9))
+		{
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 450;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 20;
+			Drop_MachineDelayFlag++;
+			if (Drop_MachineDelayFlag == 10)
+			{
+				USART_SendData(UART5, 1);
+			}
+		}
+		if (Drop_Machine_Flag == 1)//抓好了之后走这是由摄像头决定
+		{
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.P = 12000;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.I = 0;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.D = 200;
+			USART_SendData(UART4, 'X');
+			PID_Set_Angle_Value(0, ROUTE_LINE);
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 350;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 20;
+			RouteIndex = GetGoldenBallPoint_ROUTE1;
+			Y_Offset_CameraTarget = 6300;
+			Control_Index = Forward_Control;
+			Drop_MachineDelayFlag = 0;
+			Drop_Machine_Flag = 0;
+			GetBallPoint_DT35AdjustYFlag = 0;
+			GetBallPoint_DT35AdjustXFlag = 0;
+			Car_StableFlag = 0;
+		}
+		break;
+	case GetGoldenBallPoint_ROUTE1:
+
+		if (my_abs(nloc.Angle) < 2.f)
+		{
+			Car_StableFlag++;
+			if (Car_StableFlag > 10)
+			{
+				if (Car_StableFlag == 15)
+				USART_SendData(UART5, 0XB1);
+				PID_Set_LineY_Value(6300, ROUTE_TRACE_X);
+				PID_Set_LineY_Value(6300, ROUTE_LINE);
+				GetBallPoint_DT35AdjustYFlag = 1;//
+				GetBallPoint_DT35AdjustXFlag = 1;//
+
+			}
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.P = 250;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.D = 30;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 250;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 20;
+			PID_Set_LineX_Value(Get_GoldenColorBallPointX, ROUTE_TRACE_X);
+			PID_Set_LineX_Value(Get_GoldenColorBallPointX, ROUTE_LINE);
+			CameraData_UseFlag = CameraData_NotUse;
+			PID_DT35CamraLock_LineXPoint();
+			if ((my_abs(nloc.Coords.x - Get_GoldenColorBallPointX)<3) && (my_abs(nloc.Coords.y - 6300)<3))//这里要留这么点距离用pid来调，这个线路过渡这里，不能实现0秒切换，车有可能飘着走
+			{
+
+				Drop_MachineDelayFlag++;
+				if (Drop_MachineDelayFlag == 10)
+				{
+					  RouteIndex = GetGoldenBallPoint_ROUTE2;
+					  GetBallPoint_DT35AdjustYFlag = 0;
+					  GetBallPoint_DT35AdjustXFlag = 0;
+					USART_SendData(UART5, 4);
+					//GetGoldenBallPoint_DT35AdjustYFlag = 0;
+				}
+			}
+		}
+		else
+		{
+			
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.P = 300;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.D = 30;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 300;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 20;
+			Y_Offset_CameraTarget = 6300;
+			PID_Set_LineX_Value(Get_GoldenColorBallPointX, ROUTE_LINE);
+			PID_Lock_LineXPoint();
+			GetBallPoint_DT35AdjustXFlag = 0;
+			GetBallPoint_DT35AdjustYFlag = 0;//
+			CameraData_UseFlag = CameraData_NotUse;
+		}
+
+
+		if (Drop_Machine_Flag == 2)//抓好了之后走这是由摄像头决定
+		{
+			CameraData_UseFlag = CameraData_NotUse;
+			USART_SendData(UART4, 'Y');
+			RouteIndex = DropColorBallPoint2_ROUTE2;
+			Y_Offset_CameraTarget = 6300;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 200;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 20;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.P = 300;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.D = 100;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Max = 2000;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Min = -2000;
+			PID_Set_Angle_Value(0, ROUTE_LINE);
+			PID_Set_LineX_Value(Drop_SecondColorBallPointX, ROUTE_TRACE_X);
+			PID_Set_LineX_Value(Drop_SecondColorBallPointX, ROUTE_LINE);
+			Drop_MachineDelayFlag = 0;
+			PID_Set_LineY_Value(6300, ROUTE_LINE);
+			Drop_MachineDelayFlag = 0;
+			RouteIndex = DropColorBallPoint2_ROUTE2;
+			Y_Offset_CameraTarget = 6300;
+		    Drop_MachineDelayFlag = 0;
+			Drop_Machine_Flag = 0;
+			GetBallPoint_DT35AdjustYFlag = 0;
+			GetBallPoint_DT35AdjustXFlag = 0;
+			Car_StableFlag = 0;
+		}
+		if (Back_Flag == 1)//返回
+		{
+			RouteIndex = BackTo_StartPoint;
+		}
+		break;
+	case GetGoldenBallPoint_ROUTE2:
+		PID_Set_LineY_Value(6300, ROUTE_LINE);
+		PID_Set_LineX_Value(Get_GoldenColorBallPointX, ROUTE_TRACE_X);
+		PID_Set_LineX_Value(Get_GoldenColorBallPointX, ROUTE_LINE);
+		CameraData_UseFlag = CameraData_NotUse;
+
+
+		PID_DT35CamraLock_LineXPoint();
+		if (Drop_Machine_Flag == 1)//抓好了之后走这是由摄像头决定
+		{
+			X_Offset = -((int)GYRO_Location.x - Get_GoldenColorBallPointX);
+			Y_Offset = -((int)GYRO_Location.y - 6300);
+			USART_printf("GYRO_Set_Position x%d  y%d  %d  %d ", (int)GYRO_Location.x,
+				(int)GYRO_Location.y, X_Offset, Y_Offset);
+			BUZZER_ON;
+			delay_ms(100);
+			BUZZER_OFF;
+			//delay_ms(500);
+			CameraData_UseFlag = CameraData_NotUse;
+			USART_SendData(UART4, 'X');
+			RouteIndex = DropGoldenBallPoint_ROUTE1;
+			Y_Offset_CameraTarget = 6300;//因为车会往一个方向偏 这样手动补偿
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Min = -1500;
+			CameraData_UseFlag = CameraData_NotUse;
+
+			RouteIndex = DropGoldenBallPoint_ROUTE1;
+
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.P = 14000;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.I = 0;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.D = 400;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Max = 2500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Min = -2500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.P = 500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.D = 30;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Max = 2500;//2018-4-17
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Min = 2500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.P = 500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.D = 30;
+			Get_Cycle_T(0);
+
+			//X_forwardParam[0] =62;
+			//X_forwardParam[2] =10;
+			setup_Xline(Drop_GoldenColorBallPointX, X_forwardParam1);
+			GetBallPoint_DT35AdjustYFlag = 0;
+			GetBallPoint_DT35AdjustXFlag = 0;
+			Drop_MachineDelayFlag = 0;
+			Drop_Machine_Flag = 0;
+			Car_StableFlag = 0;
+
+		}
+			break;
+	case DropGoldenBallPoint_ROUTE1:
+		if ((Drop_GoldenColorBallPointX - nloc.Coords.x < -100) && (Control_Index == Forward_Control))//这里要留这么点距离用pid来调，这个线路过渡这里，不能实现0秒切换，车有可能飘着走
+		{
+			if (nloc.Coords.x < -1300)
+			{
+				PID_Set_LineY_Value(6300, ROUTE_LINE);//这里的X坐标用dt35确定
+				//PID_Set_LineY_Value(6480, ROUTE_LINE);//这里的X坐标用dt35确定
+			}
+
+			BUZZER_ON;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 800;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -800;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 400;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 30;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Max = 800;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Min = -800;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.P = 400;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.D = 30;
+
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Max = 2500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Min = -2500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.P = 500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.D = 20;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Max = 2500;//2018-4-17
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Min = -2500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.P = 500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.D = 20;
+
+			PID_Angle_Loop_Test();    //PID角度调节
+			control_Xline();           //前馈式X直线控制
+			PID_DT35CameraLineYControl();
+			PID_Set_LineX_Value(Drop_GoldenColorBallPointX, ROUTE_TRACE_X);
+			PID_Set_LineX_Value(Drop_GoldenColorBallPointX, ROUTE_LINE);
+
+		}
+		else 
+		{
+		
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 1000;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -1000;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 250;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 30;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Max = 1000;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Min = -1000;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.P = 250;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.D = 30;
+
+
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.P = 12000;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.I = 0;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.D = 200;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Max = 2000;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Min = -2000;
+
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.P = 200;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.D = 10;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.P = 200;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.D = 10;
+
+			if ( nloc.Coords.x <-6050)
+			{
+				G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Max = 600;
+				G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Min = -600;
+				G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.P = 400;
+				G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.D = 10;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Max = 600;//2018-4-17
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Min = -600;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.P = 500;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.D = 10;
+
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 500;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -500;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 500;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 20;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Max = 500;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Min = -500;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.P = 500;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.D = 20;
+
+			}
+
+			if (my_abs(nloc.Angle) < 1.5f)
+			{
+				Car_StableFlag++;
+				if (Car_StableFlag > 10)
+				{
+					    BUZZER_OFF;
+						PID_Set_LineY_Value(6300, ROUTE_LINE);//这里的X坐标用dt35确定
+						GetBallPoint_DT35AdjustYFlag = 1;
+				}
+			}
+			else
+			{
+				Car_StableFlag = 0;
+				GetBallPoint_DT35AdjustYFlag = 0;
+				GetBallPoint_DT35AdjustXFlag = 0;
+			}
+			Control_Index = 2;
+			PID_DT35CamraLock_LineXPoint();
+			if (my_abs(nloc.Coords.x - Drop_GoldenColorBallPointX)<2 && my_abs(nloc.Coords.y - 6300)<2)//这里要留这么点距离用pid来调，这个线路过渡这里，不能实现0秒切换，车有可能飘着走
+			{
+				BUZZER_ON;
+				CameraData_UseFlag = CameraData_Use;
+				Drop_MachineDelayFlag++;
+				if (Drop_MachineDelayFlag == 10)
+				{
+					//GetBallPoint_DT35AdjustYFlag = 0;
+
+					BUZZER_OFF;
+					//GYRO_Set_Position(nloc.Coords.x, nloc.Coords.y);
+					//X_Offset = -((int)GYRO_Location.x - Drop_GoldenColorBallPointX);
+					//Y_Offset = -((int)GYRO_Location.y - 6300);
+					//USART_printf("GYRO_Set_Position x%d  y%d  %d  %d ", (int)GYRO_Location.x,
+					//	(int)GYRO_Location.y, X_Offset, Y_Offset);
+					//BUZZER_ON;
+					//delay_ms(500);
+					//BUZZER_OFF;
+					USART_SendData(UART5, 2);
+					//can_buf[0] = 2; //达到第一个发射位置，让发射机构发射
+					//CAN1_SendMsg(can_buf, 0xCC);
+				}
+			}
+
+			if (Drop_Machine_Flag == 1)//
+			{
+				//Y_Offset = -((int)GYRO_Location.y - 6300);
+				//USART_printf("GYRO_Set_Position x%d  y%d  %d  %d ", (int)GYRO_Location.x,
+				//	(int)GYRO_Location.y, X_Offset, Y_Offset);
+				//BUZZER_ON;
+				//delay_ms(500);
+				//BUZZER_OFF;
+				//delay_ms(500);
+				PID_Set_Angle_Value(0, ROUTE_LINE);
+				Car_StableFlag = 0;
+
+				GetBallPoint_DT35AdjustYFlag = 0;
+
+
+				GetBallPoint_DT35AdjustXFlag = 0;
+				CameraData_UseFlag = CameraData_Use;
+				USART_SendData(UART4, 'X');
+				PID_Set_Angle_Value(0, ROUTE_TRACE_X);
+				PID_Set_Angle_Value(0, ROUTE_LINE);
+				G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Max = 2000;
+				G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Min = -2000;
+			
+
+				G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.P = 14000;
+				G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.I = 0;
+				G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.D = 400;
+
+				G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Max = 2000;
+				G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Min = -2000;
+				G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.P = 1220;
+				G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.D = 300;
+
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Max = 2000;//2018-4-17
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Min = -2000;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.P = 1220;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.D = 300;
+
+
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 800;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -800;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 400;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 30;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Max = 800;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Min = -800;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.P = 400;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.D = 30;
+				RouteIndex = BackTo_GetGoldenBallPoint_ROUTE1;
+				Y_Offset_CameraTarget = 6300;
+				Control_Index = Forward_Control;
+
+				Get_Cycle_T(0);
+				
+				setup_Xline(Get_GoldenColorBallPointX,X_forwardParam2);
+				Drop_MachineDelayFlag = 0;
+				Drop_Machine_Flag = 0;
+				GetBallPoint_DT35AdjustXFlag = 0;
+			}
+
+		}
+		if (Back_Flag == 1)//返回
+		{
+			RouteIndex = BackTo_StartPoint;
+		}
+		break;
+
+	case BackTo_GetGoldenBallPoint_ROUTE1:
+		if ((Get_GoldenColorBallPointX - nloc.Coords.x > 100) && (Control_Index == Forward_Control))//这里要留这么点距离用pid来调，这个线路过渡这里，不能实现0秒切换，车有可能飘着走
+		{
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Max = 2000;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Min = -2000;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.P = 1220;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.D = 300;
+
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Max = 2000;//2018-4-17
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Min = -2000;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.P = 1220;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.D = 300;
+
+
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 250;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 30;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.P = 250;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.D = 30;
+			PID_Set_LineY_Value(6300, ROUTE_TRACE_X);
+			PID_Set_LineY_Value(6300, ROUTE_LINE);
+			PID_Set_LineX_Value(Get_GoldenColorBallPointX, ROUTE_TRACE_X);
+			PID_Set_LineX_Value(Get_GoldenColorBallPointX, ROUTE_LINE);
+			if (my_abs(nloc.Coords.x - Get_GoldenColorBallPointX)<1000)//这里要留这么点距离用pid来调，这个线路过渡这里，不能实现0秒切换，车有可能飘着走
+			{	
+				G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Max = 2000;
+				G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Min = -2000;
+				G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.P = 1520;
+				G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.D = 300;
+
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Max = 2000;//2018-4-17
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Min = -2000;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.P = 1520;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.D = 300;
+
+			}
+				PID_Angle_Loop_Test();    //PID角度调节
+				control_Xline();           //前馈式X直线控制
+				PID_DT35CameraLineYControl();
+			
+		}
+
+		else
+		{
+	
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 250;
+			G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 30;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Max = 500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Min = -500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.P = 250;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.D = 30;
+
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Max = 2000;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Min = -2000;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.P = 12000;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.I = 0;
+			G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.D = 400;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.P = 200;
+			G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.D = 30;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Max = 1500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Min = -1500;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.P = 250;
+			G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.D = 30;
+			if (my_abs(nloc.Angle) < 1.5f )
+			 {
+				Car_StableFlag++;
+				if (Car_StableFlag > 10)
+				{
+					if (Car_StableFlag == 12)
+					{
+						USART_printf("FUCK ");
+						USART_SendData(UART5, 0xB1);
+						BUZZER_OFF;
+					}
+
+					PID_Set_LineX_Value(Get_GoldenColorBallPointX, ROUTE_LINE);
+					PID_Set_LineY_Value(6300, ROUTE_TRACE_X);
+					PID_Set_LineY_Value(6300, ROUTE_LINE);
+					GetBallPoint_DT35AdjustYFlag = 1;
+					if (Car_StableFlag > 20 && DT35_DataX<1200)
+					{
+						GetBallPoint_DT35AdjustXFlag = 1;
+					}
+				
+				}
+			}
+			else
+			{
+				Car_StableFlag = 0;
+				GetBallPoint_DT35AdjustYFlag = 0;
+				GetBallPoint_DT35AdjustXFlag = 0;
+				PID_Set_LineY_Value(6300, ROUTE_TRACE_X);
+				PID_Set_LineY_Value(6300, ROUTE_LINE);
+		
+			}
+
+			if ((Get_GoldenColorBallPointX - nloc.Coords.x < 100))
+			{
+				G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Max = 1000;
+				G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.Out_Min = -1000;
+				G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.P = 400;
+				G_PID_Parameter[ROUTE_LINE].PID_LineY.Parameter.D = 10;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Max = 1000;//2018-4-17
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.Out_Min = -1000;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.P = 500;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineY.Parameter.D = 10;
+
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 500;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -500;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.P = 250;
+				G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.D = 20;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Max = 500;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.Out_Min = -500;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.P = 250;
+				G_PID_Parameter[ROUTE_TRACE_X].PID_LineX.Parameter.D = 20;
+
+			}
+			CameraData_UseFlag = CameraData_Use;
+			Control_Index = 2;
+			PID_DT35CamraLock_LineXPoint();
+			if (my_abs(nloc.Coords.x - Get_GoldenColorBallPointX)<100 && (my_abs(nloc.Coords.y - 6300)<100))//这里要留这么点距离用pid来调，这个线路过渡这里，不能实现0秒切换，车有可能飘着走
+			{
+				Drop_MachineDelayFlag++;
+				if (Drop_MachineDelayFlag == 10)
+				{
+					BUZZER_ON;
+					USART_printf("FUCK ");
+					USART_SendData(UART5, 0xB1);
+					//can_buf[0] = 2; //达到第一个发射位置，让发射机构发射
+					//CAN1_SendMsg(can_buf, 0xCC);
+				}
+			}
+
+	
+			if (Drop_Machine_Flag == 1)//抓好了之后走这是由摄像头决定
+			{
+				Car_StableFlag = 0;
+				X_Offset = -((int)GYRO_Location.x - Get_GoldenColorBallPointX);
+				Y_Offset = -((int)GYRO_Location.y - 6300);
+				USART_printf("GYRO_Set_Position x%d  y%d  %d  %d ", (int)GYRO_Location.x,
+					(int)GYRO_Location.y, X_Offset, Y_Offset);
+				BUZZER_ON;
+				delay_ms(200);
+				BUZZER_OFF;
+				GetBallPoint_DT35AdjustXFlag = 0;
+				GetBallPoint_DT35AdjustYFlag = 0;
+				CameraData_UseFlag = CameraData_Use;
+				USART_SendData(UART4, 'Y');
+				G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Max = 2000;
+				G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Min = -2000;
+				RouteIndex = DropGoldenBallPoint_ROUTE1;
+				Y_Offset_CameraTarget = 6300;
+				Control_Index = Forward_Control;
+				Get_Cycle_T(0);
+				//X_forwardParam[0] = 57;
+				//X_forwardParam[2] = 5;
+				//X_forwardParam[1] = 0;
+				setup_Xline(Drop_GoldenColorBallPointX, X_forwardParam1);
+				Drop_MachineDelayFlag = 0;
+				Drop_Machine_Flag = 0;
+				GetBallPoint_DT35AdjustXFlag = 0;
+			}
+		}
+		if (Back_Flag == 1)//返回
+		{
+			RouteIndex = BackTo_StartPoint;
+		}
+
+	case BackTo_StartPoint:
+		G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Max = 2000;
+		G_PID_Parameter[ROUTE_LINE].PID_Angle.Parameter.Out_Min = -2000;
+		G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Max = 800;
+		G_PID_Parameter[ROUTE_LINE].PID_LineX.Parameter.Out_Min = -800;
+		Drop_MachineDelayFlag = 0;
+		PID_BackTo_StartPoint();
+		if (nloc.Coords.x == 0)
+		{
+			Stop_flag = 1;
+		}
+
+		break;
+	default:
+		break;
+	}
+	SetMotorSpeed();
+}
+
+
+
+#include "Basal_Move.h"
+#include "My_Math.h"
+#include "PID_Parameter.h"
+#include "vect.h"
+#include "Time.h"
+#include "Robot.h"
+#include "sys.h"
+#include "uart4.h"
+#include "PID_Control.h"
+#include "usart.h"
+#include "uart4.h"
+#include "Global.h"
+#include "ELMO_Driver.h"
+#include "Global.h"
+
+extern int32_t Target_Angle ,Target_X,Target_Y;
+static int32_t wheel_spd[4] = {0};
+void ClearWheelSpeed(void);
+
+void ClearWheelSpeed(void)
+{
+    memset(wheel_spd, 0, sizeof(wheel_spd));
+}
+/**
+ * @function    : 
+ * @Description : 以线速度exp_v自转,正数逆时针，负数顺时针
+**/
+void Camera_rotate_speed(int32_t exp_v)
+{
+    int32_t spd[4] = { 0 };
+
+    spd[0] = exp_v;
+    spd[1] = exp_v;
+    spd[2] = 0;
+    spd[3] = 0;
+
+    //将速度添加到底盘速度中
+    wheel_spd[0] += spd[0];
+    wheel_spd[1] += spd[1];
+    wheel_spd[2] = 0;
+    wheel_spd[3] += spd[3];
+}
+
+
+
+void rotate_speed(int32_t exp_v)
+{
+    int32_t spd[4] = {0};
+
+    spd[0] = exp_v;
+    spd[1] = exp_v;
+    spd[2] = exp_v;
+    spd[3] = exp_v;
+
+    //将速度添加到底盘速度中
+    wheel_spd[0] += spd[0];
+    wheel_spd[1] += spd[1];
+    wheel_spd[2]  = 0;
+    wheel_spd[3] += spd[3];
+}
+
+/**
+ * @function    : linear_speed
+ * @Description : 以速度exp_v沿向量(x,y)的方向移动，alpha是车身与世界坐标y轴正方向的夹角
+**/
+void linear_speed(int32_t x, int32_t y, float alpha, int32_t exp_v)
+{
+    double spd_gain = 1;
+    int32_t spd[4] = {0};
+    int64_t Vx = x,
+            Vy = y,
+            V  = 0;
+    alpha = alpha + OFFSET_ANG; //获取车正方向的夹角
+    V  = my_sqrt(square(Vx) + square(Vy));
+    if (V == 0) spd_gain = 0;
+    else spd_gain = (double)exp_v / (double)V;
+    Vx = x * spd_gain;
+    Vy = y * spd_gain;
+
+    /*带角度*/
+    spd[0] = -Vy * my_sin(60 + alpha ) - Vx * my_cos(60 + alpha);
+    spd[1] = Vy * my_sin(60 - alpha ) - Vx * my_cos(60 - alpha );
+    spd[3] = Vy * my_sin(alpha) + Vx * my_cos(alpha );//2017.11.15.19.35 改了坐标方向最好再看看对不
+
+
+    ///*带角度*/
+    //spd[0] = -Vy * my_sin(60 - alpha) + Vx * my_cos(60 - alpha);
+    //spd[1] = Vy * my_sin(60 + alpha) + Vx * my_cos(60 + alpha);
+    //spd[3] = -Vy * my_sin(alpha) - Vx * my_cos(alpha);
+
+    ///*带角度/
+    //spd[0] =  -Vx * my_sin(60 - alpha) + Vy * my_cos(60 - alpha) ;
+    //spd[1] =  Vx * my_sin(60 + alpha) + Vy * my_cos(60 + alpha);
+    //spd[3] =  -Vx * my_sin(alpha) - Vy * my_cos(alpha);
+
+
+    //将速度添加到底盘速度中
+    wheel_spd[0] += spd[0];
+    wheel_spd[1] += spd[1];
+    wheel_spd[2] += 0;
+    wheel_spd[3] += spd[3];
+}
+
+/**
+ * @function    :
+ * @Description : 将速度发送到elmo
+ * 三轮，只用了spd0 1 3
+**/
+extern EncodePointTypeDef GYRO_Location;
+int32_t Stop_flag=0;
+extern int32_t Task_Go_Flag;;
+void SetMotorSpeed(void)
+{
+	int32_t spd[4] = { 0 };
+	int32_t max_spd;		    //最大转速
+	float   percent = 0.0;	    //缩放比例
+	//*电机线速度转换成转速  因为你给EPOS发的指令是r/min  这次用的减速比是J=21的,轮子直径是125mm
+	//转速n=wheel_spd[]*60*J/(R*2*3.14)   所以转速n=wheel_spd[]*60*21/(125*3.14)=wheel_spd[]*3.21*/
+	spd[0] = wheel_spd[0] * 3.21;
+	spd[1] = wheel_spd[1] * 3.21;
+	spd[2] = wheel_spd[2] * 3.21;
+	spd[3] = wheel_spd[3] * 3.21;
+	/*电机线速度转换成转速  因为你给EPOS发的指令是r/min  这次用的减速比是J=12的,轮子直径是125mm
+	转速n=wheel_spd[]*60*J/(R*2*3.14)   所以转速n=wheel_spd[]*60*12/(125*3.14)=wheel_spd[]*1.83*/
+	//spd[0] = wheel_spd[0] * 1.83;
+	//spd[1] = wheel_spd[1] * 1.83;
+	//spd[2] = wheel_spd[2] * 1.83;
+	//spd[3] = wheel_spd[3] * 1.83;
+	//清空轮子速度
+	ClearWheelSpeed();
+
+	//求得轮子速度的绝对值的最大值
+	max_spd = my_max(my_max(my_max(my_abs(spd[0]), my_abs(spd[1])), my_abs(spd[2])), my_abs(spd[3]));
+	//限速
+	if (max_spd > MAX_SPEED)
+	{
+		//根据比例缩放电机速度
+		percent = (double)MAX_SPEED / (double)max_spd;
+		spd[0] *= percent;
+		spd[1] *= percent;
+		spd[2] *= percent;
+		spd[3] *= percent;
+	}
+	if (Stop_flag == 1 || GYRO_Location.Angle < -30 || GYRO_Location.Angle>30)
+		//if (Stop_flag == 1)
+	{
+		//					ELMO_Velocity_Change(0, 0, 0);
+		Motor_Stop();
+	}
+	else
+	{
+		//			ELMO_Velocity_Change(spd[0], spd[1], spd[3]);
+		Profile_Velocity_Change(spd[0], spd[1], spd[2], spd[3]);
+	}
+
+	int v1 = spd[0], v2 = spd[1], v3 = spd[3], Cur_speed = G_Robot_Master.cur_speed, x = nloc.Coords.x, y = nloc.Coords.y, angle = nloc.Angle/*, Time_ms = GetSysTime_us() / 1000*/;  //Get_Cycle_T(2);
+	USART_printf("\r\nx %d\ty  %d\t A %d\t C %d\t\r\n", x, y, angle, CameraData_Centerpoint);
+	USART_printf("\r\nDX %d\tDY %d\tAX %d\tAY %d\t R%d\r\n", DT35_DataX, DT35_DataY, GetBallPoint_DT35AdjustXFlag, GetBallPoint_DT35AdjustYFlag, RouteIndex);
+	USART_printf("\r\Lo_X %d\Lo_Y %d\tD  %d\r\n", (s32)(GYRO_Location.x) + X_Offset, (int)GYRO_Location.y + Y_Offset, Drop_MachineDelayFlag);
+}
+/**
+* @function    :
+* @Description : 电机急停
+**/
+void Motor_Stop(void)
+{
+    ClearWheelSpeed();
+Profile_Velocity_Stop();
+}
